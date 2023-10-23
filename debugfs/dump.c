@@ -97,10 +97,11 @@ static void fix_perms(const char *cmd, const struct ext2_inode *inode,
 		com_err(cmd, errno, "while setting times of %s", name);
 }
 
-static void dump_file(const char *cmdname, ext2_ino_t ino, int fd,
+static int dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 		      int preserve, char *outname)
 {
 	errcode_t retval;
+  errcode_t retcode;
 	struct ext2_inode	inode;
 	char		*buf = 0;
 	ext2_file_t	e2_file;
@@ -108,17 +109,17 @@ static void dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 	unsigned int	got, blocksize = current_fs->blocksize;
 
 	if (debugfs_read_inode(ino, &inode, cmdname))
-		return;
+		return 1;
 
 	retval = ext2fs_file_open(current_fs, ino, 0, &e2_file);
 	if (retval) {
 		com_err(cmdname, retval, "while opening ext2 file");
-		return;
+		return retval;
 	}
 	retval = ext2fs_get_mem(blocksize, &buf);
 	if (retval) {
 		com_err(cmdname, retval, "while allocating memory");
-		return;
+		return retval;
 	}
 	while (1) {
 		retval = ext2fs_file_read(e2_file, buf, blocksize, &got);
@@ -129,31 +130,39 @@ static void dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 		if (got == 0)
 			break;
 		nbytes = write(fd, buf, got);
-		if ((unsigned) nbytes != got)
-			com_err(cmdname, errno, "while writing file");
+		if ((unsigned) nbytes != got) {
+      com_err(cmdname, errno, "while writing file");
+      retval = 1;
+      break;
+    }
 	}
-	if (buf)
+
+  retcode = retval;
+
+  if (buf)
 		ext2fs_free_mem(&buf);
-	retval = ext2fs_file_close(e2_file);
+	
+  retval = ext2fs_file_close(e2_file);
 	if (retval) {
 		com_err(cmdname, retval, "while closing ext2 file");
-		return;
+		return retval;
 	}
 
 	if (preserve)
 		fix_perms("dump_file", &inode, fd, outname);
 
-	return;
+	return retcode;
 }
 
 void do_dump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
 	     void *infop EXT2FS_ATTR((unused)))
 {
+  int retval;
 	ext2_ino_t	inode;
 	int		fd;
 	int		c;
 	int		preserve = 0;
-	char		*in_fn, *out_fn;
+  char		*in_fn, *out_fn;
 
 	reset_getopt();
 	while ((c = getopt (argc, argv, "p")) != EOF) {
@@ -165,37 +174,36 @@ void do_dump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
 		print_usage:
 			com_err(argv[0], 0, "Usage: dump_inode [-p] "
 				"<file> <output_file>");
-			return;
+			exit(1);
 		}
 	}
 	if (optind != argc-2)
 		goto print_usage;
 
 	if (check_fs_open(argv[0]))
-		return;
+		exit(1);
 
 	in_fn = argv[optind];
 	out_fn = argv[optind+1];
 
 	inode = string_to_inode(in_fn);
 	if (!inode)
-		return;
+		exit(1);
 
 	fd = open(out_fn, O_CREAT | O_WRONLY | O_TRUNC | O_LARGEFILE, 0666);
 	if (fd < 0) {
 		com_err(argv[0], errno, "while opening %s for dump_inode",
 			out_fn);
-		return;
+		exit(1);
 	}
 
-	dump_file(argv[0], inode, fd, preserve, out_fn);
-	if (close(fd) != 0) {
+	retval = dump_file(argv[0], inode, fd, preserve, out_fn);
+  if (close(fd) != 0) {
 		com_err(argv[0], errno, "while closing %s for dump_inode",
 			out_fn);
-		return;
+		exit(1);
 	}
-
-	return;
+	exit(retval);
 }
 
 static void rdump_symlink(ext2_ino_t ino, struct ext2_inode *inode,
@@ -273,8 +281,12 @@ static void rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 			com_err("rdump", errno, "while opening %s", fullname);
 			goto errout;
 		}
-		dump_file("rdump", ino, fd, 1, fullname);
-		if (close(fd) != 0) {
+		if (dump_file("rdump", ino, fd, 1, fullname) != 0) {
+      com_err("rdump", errno, "while dumping %s", fullname);
+			free(fullname);
+      exit(1);
+    }
+    if (close(fd) != 0) {
 			com_err("rdump", errno, "while closing %s", fullname);
 			goto errout;
 		}
