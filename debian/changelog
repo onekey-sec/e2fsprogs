@@ -1,3 +1,9 @@
+e2fsprogs (1.47.0-3.ok1) unstable; urgency=medium
+
+  * Fix endless loop in debugfs rdump
+
+ -- Quentin Kaiser <quentin.kaiser@onekey.com>  Mon, 23 Oct 2023 08:33:10 -0500
+
 e2fsprogs (1.47.0-3) unstable; urgency=medium
 
   * Re-enable metadata_csum_seed and orphan_file by default now that
