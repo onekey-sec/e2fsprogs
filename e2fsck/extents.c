@@ -201,9 +201,12 @@ static errcode_t rewrite_extent_replay(e2fsck_t ctx, struct extent_list *list,
 {
 	errcode_t		retval;
 	ext2_extent_handle_t	handle;
-	unsigned int		i, ext_written;
+	unsigned int		i;
 	struct ext2fs_extent	*ex, extent;
 	blk64_t			start_val, delta;
+	#if defined(DEBUG) || defined(DEBUG_SUMMARY)
+	unsigned int ext_written;
+	#endif
 
 	/* Reset extent tree */
 	inode->i_flags &= ~EXT4_EXTENTS_FL;
@@ -223,7 +226,9 @@ static errcode_t rewrite_extent_replay(e2fsck_t ctx, struct extent_list *list,
 	if (retval)
 		return retval;
 
+	#if defined(DEBUG) || defined(DEBUG_SUMMARY)
 	ext_written = 0;
+	#endif
 
 	start_val = ext2fs_get_stat_i_blocks(ctx->fs, EXT2_INODE(inode));
 
@@ -263,7 +268,9 @@ static errcode_t rewrite_extent_replay(e2fsck_t ctx, struct extent_list *list,
 		retval = ext2fs_extent_fix_parents(handle);
 		if (retval)
 			goto err;
+		#if defined(DEBUG) || defined(DEBUG_SUMMARY)
 		ext_written++;
+		#endif
 	}
 
 	delta = ext2fs_get_stat_i_blocks(ctx->fs, EXT2_INODE(inode)) -
