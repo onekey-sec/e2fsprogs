@@ -262,10 +262,15 @@ errout:
 	free(buf);
 }
 
+typedef struct {
+  char* fullname;
+  int preserve;
+} rdump_dirent_private;
+
 static int rdump_dirent(struct ext2_dir_entry *, int, int, char *, void *);
 
 static int rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
-			const char *name, const char *dumproot)
+			const char *name, const char *dumproot, int preserve)
 {
 	char *fullname;
 	int result = 0;
@@ -290,7 +295,7 @@ static int rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 			goto errout;
 		}
 
-		if (dump_file("rdump", ino, fd, 1, fullname) != 0) {
+		if (dump_file("rdump", ino, fd, preserve, fullname) != 0) {
 			result = 1;
 			com_err("rdump", errno, "while dumping %s", fullname);
 		}
@@ -315,14 +320,23 @@ static int rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 			goto errout;
 		}
 
+		rdump_dirent_private* entry = malloc(sizeof(rdump_dirent_private));
+		if (entry == NULL) {
+			com_err("rdump", errno, "while allocating entry for %s", fullname);
+			goto errout;
+		}
+		entry->fullname = fullname;
+		entry->preserve = preserve;
+
 		retval = ext2fs_dir_iterate(current_fs, ino, 0, 0,
-					    rdump_dirent, (void *) fullname);
+					    rdump_dirent, (void *) entry);
+		free(entry);
 		if (retval) {
 			com_err("rdump", retval, "while dumping %s", fullname);
 			result = 1;
 		}
-
-		fix_perms("rdump", inode, -1, fullname);
+		if (preserve)
+			fix_perms("rdump", inode, -1, fullname);
 	}
 	/* else do nothing (don't dump device files, sockets, fifos, etc.) */
 
@@ -338,9 +352,9 @@ static int rdump_dirent(struct ext2_dir_entry *dirent,
 {
 	char name[EXT2_NAME_LEN + 1];
 	int thislen;
-	const char *dumproot = private;
 	struct ext2_inode inode;
 
+	rdump_dirent_private *dirent_private = (rdump_dirent_private *) private;
 	thislen = ext2fs_dirent_name_len(dirent);
 	strncpy(name, dirent->name, thislen);
 	name[thislen] = 0;
@@ -348,7 +362,7 @@ static int rdump_dirent(struct ext2_dir_entry *dirent,
 	if (debugfs_read_inode(dirent->inode, &inode, name))
 		return 0;
 
-	return rdump_inode(dirent->inode, &inode, name, dumproot);
+	return rdump_inode(dirent->inode, &inode, name, dirent_private->fullname, dirent_private->preserve);
 }
 
 void do_rdump(int argc, char **argv, int sci_idx,
@@ -356,11 +370,24 @@ void do_rdump(int argc, char **argv, int sci_idx,
 {
 	struct stat st;
 	char *dest_dir;
-	int i;
+	int i, c;
+	int preserve = 0;
+	ext2_ino_t ino;
+	struct ext2_inode inode;
 
-	if (common_args_process(argc, argv, 3, INT_MAX, "rdump",
-				"<directory>... <native directory>", 0))
-		return;
+	reset_getopt();
+	while ((c = getopt(argc, argv, "p")) != EOF) {
+		switch (c) {
+			case 'p':
+				preserve++;
+				break;
+			default:
+				goto print_usage;
+		}
+	}
+
+	if (optind  > argc - 2)
+		goto print_usage;
 
 	/* Pull out last argument */
 	dest_dir = argv[argc - 1];
@@ -376,10 +403,9 @@ void do_rdump(int argc, char **argv, int sci_idx,
 		return;
 	}
 
-	for (i = 1; i < argc; i++) {
+	for (i = optind; i < argc; i++) {
 		char *arg = argv[i], *basename;
-		struct ext2_inode inode;
-		ext2_ino_t ino = string_to_inode(arg);
+		ino = string_to_inode(arg);
 		if (!ino)
 			continue;
 
@@ -392,9 +418,16 @@ void do_rdump(int argc, char **argv, int sci_idx,
 		else
 			basename = arg;
 
-		if (rdump_inode(ino, &inode, basename, dest_dir) != 0)
+		if (rdump_inode(ino, &inode, basename, dest_dir, preserve) != 0)
 			ss_set_exit_status(sci_idx, 1);
 	}
+	return;
+
+print_usage:
+	com_err(argv[0], 0,
+			"Usage: rdump [-p] "
+			"<fs_directory>... <output_directory>");
+	ss_set_exit_status(sci_idx, 1);
 }
 
 void do_cat(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
