@@ -227,3 +227,13 @@ int ss_execute_line(int sci_idx, char *line_ptr)
 
     return(ret);
 }
+
+void ss_set_exit_status(int sci_idx, int code)
+{
+	ss_info(sci_idx)->exit_status = code;
+}
+
+int ss_get_exit_status(int sci_idx)
+{
+	return ss_info(sci_idx)->exit_status;
+}
