@@ -2665,6 +2665,8 @@ int main(int argc, char **argv)
 		if (retval) {
 			ss_perror(ss_sci_idx, retval, request);
 			exit_status++;
+		} else {
+			exit_status = ss_get_exit_status(ss_sci_idx);
 		}
 	} else if (cmd_file) {
 		exit_status = source_file(cmd_file, ss_sci_idx);
