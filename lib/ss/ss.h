@@ -76,6 +76,8 @@ int ss_create_invocation(const char *, const char *, void *,
 void ss_delete_invocation(int);
 int ss_listen(int);
 int ss_execute_line(int, char *);
+void ss_set_exit_status(int sci_idx, int code);
+int ss_get_exit_status(int sci_idx);
 void ss_add_request_table(int, ss_request_table *, int, int *);
 void ss_delete_request_table(int, ss_request_table *, int *);
 void ss_abort_subsystem(int sci_idx, int code);
