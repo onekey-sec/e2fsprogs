@@ -30,6 +30,7 @@ extern int optind;
 extern char *optarg;
 #endif
 
+#include <ss/ss.h>
 #include "debugfs.h"
 
 #ifndef O_LARGEFILE
@@ -101,7 +102,7 @@ static int dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 		      int preserve, char *outname)
 {
 	errcode_t retval;
-  errcode_t retcode;
+	int retcode = 0;
 	struct ext2_inode	inode;
 	char		*buf = 0;
 	ext2_file_t	e2_file;
@@ -114,38 +115,36 @@ static int dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 	retval = ext2fs_file_open(current_fs, ino, 0, &e2_file);
 	if (retval) {
 		com_err(cmdname, retval, "while opening ext2 file");
-		return retval;
+		return 1;
 	}
 	retval = ext2fs_get_mem(blocksize, &buf);
 	if (retval) {
 		com_err(cmdname, retval, "while allocating memory");
-		return retval;
+		return 1;
 	}
 	while (1) {
 		retval = ext2fs_file_read(e2_file, buf, blocksize, &got);
 		if (retval) {
 			com_err(cmdname, retval, "while reading ext2 file");
+			retcode = 1;
 			break;
 		}
 		if (got == 0)
 			break;
 		nbytes = write(fd, buf, got);
 		if ((unsigned) nbytes != got) {
-      com_err(cmdname, errno, "while writing file");
-      retval = 1;
-      break;
-    }
+			com_err(cmdname, errno, "while writing file");
+			retcode = 1;
+			break;
+		}
 	}
 
-  retcode = retval;
-
-  if (buf)
+	if (buf)
 		ext2fs_free_mem(&buf);
-	
-  retval = ext2fs_file_close(e2_file);
+	retval = ext2fs_file_close(e2_file);
 	if (retval) {
 		com_err(cmdname, retval, "while closing ext2 file");
-		return retval;
+		return 1;
 	}
 
 	if (preserve)
@@ -154,15 +153,15 @@ static int dump_file(const char *cmdname, ext2_ino_t ino, int fd,
 	return retcode;
 }
 
-void do_dump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
+void do_dump(int argc, char **argv, int sci_idx,
 	     void *infop EXT2FS_ATTR((unused)))
 {
-  int retval;
 	ext2_ino_t	inode;
 	int		fd;
 	int		c;
 	int		preserve = 0;
-  char		*in_fn, *out_fn;
+	char		*in_fn, *out_fn;
+	int		retval;
 
 	reset_getopt();
 	while ((c = getopt (argc, argv, "p")) != EOF) {
@@ -174,36 +173,43 @@ void do_dump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
 		print_usage:
 			com_err(argv[0], 0, "Usage: dump_inode [-p] "
 				"<file> <output_file>");
-			exit(1);
+			ss_set_exit_status(sci_idx, 1);
+			return;
 		}
 	}
 	if (optind != argc-2)
 		goto print_usage;
 
-	if (check_fs_open(argv[0]))
-		exit(1);
+	if (check_fs_open(argv[0])) {
+		ss_set_exit_status(sci_idx, 1);
+		return;
+	}
 
 	in_fn = argv[optind];
 	out_fn = argv[optind+1];
 
 	inode = string_to_inode(in_fn);
-	if (!inode)
-		exit(1);
+	if (!inode) {
+		ss_set_exit_status(sci_idx, 1);
+		return;
+	}
 
 	fd = open(out_fn, O_CREAT | O_WRONLY | O_TRUNC | O_LARGEFILE, 0666);
 	if (fd < 0) {
 		com_err(argv[0], errno, "while opening %s for dump_inode",
 			out_fn);
-		exit(1);
+		ss_set_exit_status(sci_idx, 1);
+		return;
 	}
 
 	retval = dump_file(argv[0], inode, fd, preserve, out_fn);
-  if (close(fd) != 0) {
+	if (close(fd) != 0) {
 		com_err(argv[0], errno, "while closing %s for dump_inode",
 			out_fn);
-		exit(1);
+		ss_set_exit_status(sci_idx, 1);
+		return;
 	}
-	exit(retval);
+	ss_set_exit_status(sci_idx, !!retval);
 }
 
 static void rdump_symlink(ext2_ino_t ino, struct ext2_inode *inode,
@@ -258,17 +264,18 @@ errout:
 
 static int rdump_dirent(struct ext2_dir_entry *, int, int, char *, void *);
 
-static void rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
+static int rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 			const char *name, const char *dumproot)
 {
 	char *fullname;
+	int result = 0;
 
 	/* There are more efficient ways to do this, but this method
 	 * requires only minimal debugging. */
 	fullname = malloc(strlen(dumproot) + strlen(name) + 2);
 	if (!fullname) {
 		com_err("rdump", errno, "while allocating memory");
-		return;
+		return 1;
 	}
 	sprintf(fullname, "%s/%s", dumproot, name);
 
@@ -279,17 +286,22 @@ static void rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 		fd = open(fullname, O_WRONLY | O_CREAT | O_TRUNC | O_LARGEFILE, S_IRWXU);
 		if (fd == -1) {
 			com_err("rdump", errno, "while opening %s", fullname);
+			result = 1;
 			goto errout;
 		}
+
 		if (dump_file("rdump", ino, fd, 1, fullname) != 0) {
-      com_err("rdump", errno, "while dumping %s", fullname);
-			free(fullname);
-      exit(1);
-    }
-    if (close(fd) != 0) {
-			com_err("rdump", errno, "while closing %s", fullname);
-			goto errout;
+			result = 1;
+			com_err("rdump", errno, "while dumping %s", fullname);
 		}
+
+		if (close(fd) != 0) {
+			result = 1;
+			com_err("rdump", errno, "while closing %s", fullname);
+		}
+
+		if (result)
+			goto errout;
 	}
 	else if (LINUX_S_ISDIR(inode->i_mode) && strcmp(name, ".") && strcmp(name, "..")) {
 		errcode_t retval;
@@ -299,13 +311,16 @@ static void rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 		 * once we've done the traversal. */
 		if (name[0] && mkdir(fullname, S_IRWXU) == -1) {
 			com_err("rdump", errno, "while making directory %s", fullname);
+			result = 1;
 			goto errout;
 		}
 
 		retval = ext2fs_dir_iterate(current_fs, ino, 0, 0,
 					    rdump_dirent, (void *) fullname);
-		if (retval)
+		if (retval) {
 			com_err("rdump", retval, "while dumping %s", fullname);
+			result = 1;
+		}
 
 		fix_perms("rdump", inode, -1, fullname);
 	}
@@ -313,6 +328,7 @@ static void rdump_inode(ext2_ino_t ino, struct ext2_inode *inode,
 
 errout:
 	free(fullname);
+	return result;
 }
 
 static int rdump_dirent(struct ext2_dir_entry *dirent,
@@ -332,12 +348,10 @@ static int rdump_dirent(struct ext2_dir_entry *dirent,
 	if (debugfs_read_inode(dirent->inode, &inode, name))
 		return 0;
 
-	rdump_inode(dirent->inode, &inode, name, dumproot);
-
-	return 0;
+	return rdump_inode(dirent->inode, &inode, name, dumproot);
 }
 
-void do_rdump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
+void do_rdump(int argc, char **argv, int sci_idx,
 	      void *infop EXT2FS_ATTR((unused)))
 {
 	struct stat st;
@@ -378,7 +392,8 @@ void do_rdump(int argc, char **argv, int sci_idx EXT2FS_ATTR((unused)),
 		else
 			basename = arg;
 
-		rdump_inode(ino, &inode, basename, dest_dir);
+		if (rdump_inode(ino, &inode, basename, dest_dir) != 0)
+			ss_set_exit_status(sci_idx, 1);
 	}
 }
 
