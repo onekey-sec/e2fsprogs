@@ -1,3 +1,10 @@
+e2fsprogs (1.47.0-3.ok2) unstable; urgency=medium
+
+  * Allow using exit_status to signal errors from debugfs subcommands
+  * Introduce a preserve command line switch in debugfs 'rdump' command
+
+ -- Quentin Kaiser <quentin.kaiser@onekey.com>  Mon, 14 Feb 2024 16:20:10 -0500
+
 e2fsprogs (1.47.0-3.ok1) unstable; urgency=medium
 
   * Fix endless loop in debugfs rdump
