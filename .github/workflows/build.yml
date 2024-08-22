@@ -15,28 +15,23 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  build_amd64:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture:
+          - amd64
+          - arm64
+          - arm/v7
     steps:
-      - uses: actions/checkout@v2
-      - name: Build Debian package (AMD64)
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: build Debian package
         uses: dawidd6/action-debian-package@v1.5.0
         with:
           os_distribution: bookworm
-          cpu_architecture: amd64
-      - name: Upload DEB artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          path: ${{ github.workspace }}/*.deb
-  build_arm64:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Build Debian package (AARCH64)
-        uses: dawidd6/action-debian-package@v1.5.0
-        with:
-          os_distribution: bookworm
-          cpu_architecture: arm64
+          cpu_architecture: ${{ matrix.architecture }}
       - name: Upload DEB artifacts
         uses: actions/upload-artifact@v2
         with:
